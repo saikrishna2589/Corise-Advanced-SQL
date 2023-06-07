@@ -1,0 +1,60 @@
+/* I initially used the same code to get the customer data with unique city state combinations.
+Thereafter i joined the customer survey and reciepe tags table to get the food preferences by customer.
+I then used a 'Case when' statement to create 3 columns based on top 3 row numbers by customer food preferences.(instead of pivoting)
+I then flattened the chefs_receipe table and cleansed the 'value' column along wiht choosing 1 receipe per tag and storing it in another CTE.
+I finally joined the top_3_food_preferences table to the one_receipe_per_tag table to get the receipe suggestion along with customer's top 3 food preferences.
+*/
+
+WITH unique_US_Cities AS
+(SELECT distinct *
+from RESOURCES.US_CITIES),
+
+customers_CTE AS
+(SELECT CD.CUSTOMER_ID,cd.email,cd.first_name
+FROM  CUSTOMERS.CUSTOMER_DATA AS CD
+LEFT JOIN CUSTOMERS.CUSTOMER_ADDRESS AS CA
+ON trim(CD.CUSTOMER_ID)=trim(CA.CUSTOMER_ID)
+INNER JOIN unique_US_Cities AS R
+ON upper(trim(CA.CUSTOMER_CITY))=upper(trim(R.CITY_NAME))
+AND upper(trim(CA.CUSTOMER_STATE))=upper(trim(R.STATE_ABBR))
+),
+
+food_preferences AS 
+(SELECT c.customer_ID, c.email,c.first_name,r.tag_property as tags,
+row_number() OVER (PARTITION BY c.customer_id ORDER BY tags) as fp_number
+FROM customers_CTE as c
+INNER JOIN customers.customer_survey as cs
+ON c.customer_ID=cs.customer_id
+LEFT JOIN resources.recipe_tags as r
+ON cs.tag_id=r.tag_id),
+
+top_3_food_preferences AS (
+SELECT 
+    f.customer_id,f.email,f.first_name,
+    Max(CASE WHEN f.fp_number=1 then tags end) as food_preference_1,
+    max(CASE WHEN f.fp_number=2 then tags end) as food_preference_2,
+    max(CASE WHEN f.fp_number=3 then tags end) as food_preference_3
+    FROM food_preferences as f
+    WHERE fp_number<=3
+    GROUP BY f.customer_id,f.email,f.first_name
+  ORDER BY f.first_name),
+  
+  chefs_recipe_flattened AS (
+  SELECT recipe_id,chef_id,recipe_name,
+  trim(replace(flat_tag.value, '"', '')) as recipe_tag
+    FROM CHEFS.RECIPE,
+  TABLE (FLATTEN(TAG_LIST)) AS flat_tag),
+
+ one_recipe_per_tag AS (
+ SELECT recipe_tag , max(recipe_name) as recipe_name
+ FROM chefs_recipe_flattened
+ GROUP BY 1
+ )
+  SELECT customer_id,email,first_name,food_preference_1,food_preference_2,food_preference_3,recipe_name
+  FROM top_3_food_preferences as fp
+  LEFT JOIN one_recipe_per_tag as o
+  ON trim(fp.food_preference_1)=trim(o.recipe_tag)
+  ORDER BY email
+
+
+

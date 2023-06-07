@@ -1,0 +1,53 @@
+/*
+I created customers_CTE  that joins the customer data table with the customer address table and resources table to get the
+customer info along with geospatial details.
+Another CTE is of supplier ' supplier_state_cte' joining supplier details with the resources table to obtain the geospatial details.
+Third CTE is a table called 'distance' that cross joins each row of customer_cte with supplier_state_cte to get all combinations of customer and supplier geospatial rows.
+From this finally, I did a subquery with inner join between the 'distance table' and 'closest table,which gets the 'minimum' distance to get the final view.
+This view provides closest distance from each customer to the nearest supplier.
+*/
+
+
+WITH unique_US_Cities AS
+(SELECT distinct *
+from RESOURCES.US_CITIES),
+
+customers_CTE AS
+(SELECT CD.CUSTOMER_ID,CD.FIRST_NAME,CD.LAST_NAME,CD.EMAIL,CA.CUSTOMER_CITY,CA.CUSTOMER_STATE,R.STATE_ABBR,R.LAT,R.LONG,R.GEO_LOCATION
+FROM  CUSTOMERS.CUSTOMER_DATA AS CD
+LEFT JOIN CUSTOMERS.CUSTOMER_ADDRESS AS CA
+ON trim(CD.CUSTOMER_ID)=trim(CA.CUSTOMER_ID)
+LEFT JOIN unique_US_Cities AS R
+ON upper(trim(CA.CUSTOMER_CITY))=upper(trim(R.CITY_NAME))
+AND upper(trim(CA.CUSTOMER_STATE))=upper(trim(R.STATE_ABBR))
+),
+supplier_state_cte AS
+(
+SELECT *
+FROM SUPPLIERS.SUPPLIER_INFO AS S
+LEFT JOIN unique_US_Cities AS R 
+ON UPPER(S.SUPPLIER_CITY)=UPPER(R.CITY_NAME) AND UPPER(S.SUPPLIER_STATE)=upper(R.STATE_ABBR) ),
+distance AS
+(SELECT C.CUSTOMER_ID,C.FIRST_NAME,C.LAST_NAME,C.EMAIL,SUPPLIER_ID,SUPPLIER_NAME,ROUND((ST_DISTANCE(ST_POINT(trim(C.LONG),trim(C.LAT)),
+ST_POINT(trim(SS.LONG), trim(SS.LAT)))/1609.344),2) AS distance_miles
+FROM customers_cte as C 
+CROSS JOIN supplier_state_cte as SS),
+distance_sort AS 
+(SELECT *, row_number() OVER (PARTITION BY customer_id ORDER BY distance_miles ) AS closest
+FROM distance
+ORDER BY last_name,first_name,distance_miles)
+
+
+ 
+
+SELECT  d.CUSTOMER_ID,d.FIRST_NAME,d.LAST_NAME,d.EMAIL,SUPPLIER_ID,SUPPLIER_NAME,distance_miles
+FROM distance AS d
+INNER JOIN 
+(
+SELECT 
+CUSTOMER_ID,MIN(DISTANCE_miles) AS min_distance
+FROM distance
+GROUP BY CUSTOMER_ID
+) AS closest 
+ON d.CUSTOMER_ID=closest.CUSTOMER_ID AND d.distance_miles=closest.min_distance
+ORDER BY d.last_name ASC,d.first_name ASC

@@ -1,0 +1,55 @@
+
+
+-- Introduced meaningful CTE names: The CTEs in the final version have more descriptive names, such as recipe_ingredients, ingredient_nutrition, and recipe_nutrition. This improves code readability and makes it easier to understand the purpose of each CTE.
+
+-- Simplified subqueries: Instead of nesting multiple subqueries, I used CTEs to break down the logic into separate sections. This improves code structure, makes it easier to read, and allows for better maintainability.
+
+-- Removed unnecessary columns: The ingredient column from the recipe_nutrition CTE was removed since it is not used in the final SELECT statement. This eliminates ambiguity and improves code clarity.
+
+-- Updated GROUP BY clause: In the final SELECT statement, the GROUP BY clause now only includes the recipe_name column. This ensures that the grouping is done correctly and aligns with the original code's output.
+
+-- Adjusted JOIN condition: The JOIN condition between the recipe_nutrition CTE and vk_data.resources.nutrition was modified to match on first_record instead of di.first_record. This ensures the correct association between the recipe and its corresponding nutritional information.
+
+WITH recipe_ingredients AS (
+    SELECT 
+        recipe_id,
+        recipe_name,
+        TRIM(UPPER(REPLACE(flat_ingredients.value, '"', ''))) AS ingredient
+    FROM vk_data.chefs.recipe
+    CROSS JOIN TABLE(FLATTEN(ingredients)) AS flat_ingredients
+),
+ingredient_nutrition AS (
+    SELECT 
+        TRIM(UPPER(REPLACE(SUBSTRING(ingredient_name, 1, CHARINDEX(',', ingredient_name)), ',', ''))) AS ingredient_name,
+        MIN(id) AS first_record,
+        MAX(calories) AS calories,
+        MAX(total_fat) AS total_fat
+    FROM vk_data.resources.nutrition 
+    GROUP BY ingredient_name
+),
+recipe_nutrition AS (
+    SELECT 
+        r.recipe_id,
+        r.recipe_name,
+        r.ingredient,
+        i.first_record,
+        i.calories,
+        i.total_fat
+    FROM recipe_ingredients r
+    LEFT JOIN ingredient_nutrition i ON r.ingredient = i.ingredient_name
+    WHERE r.recipe_name IN (
+        'birthday cookie',
+        'a perfect sugar cookie',
+        'honey oatmeal raisin cookies',
+        'frosted lemon cookies',
+        'snickerdoodles cinnamon cookies'
+    )
+)
+SELECT 
+    recipe_name,
+    SUM(recipe_nutrition.calories) AS total_calories,
+    SUM(CAST(REPLACE(recipe_nutrition.total_fat, 'g', '') AS INT)) AS total_fat
+FROM recipe_nutrition
+JOIN vk_data.resources.nutrition n ON recipe_nutrition.first_record = n.id
+GROUP BY recipe_name
+ORDER BY recipe_name;

@@ -1,68 +1,64 @@
---     Improvements Made:
 
--- Refactored the subquery that calculates the food preference counts into a CTE (Common Table Expression) named food_pref_counts. This enhances readability and separates the logic.
--- Created CTEs (chicago_location and gary_location) to retrieve the geo_locations for Chicago and Gary. This avoids repetitive subqueries and improves efficiency.
--- Used CONCAT function instead of concatenation (|| operator) for better readability when combining the first name and last name.
--- Replaced the ::INT casting with simple division (/ 1609) since the division already produces float values.
--- Improved formatting by aligning the code sections and adding consistent indentation ,making it easier to read and understand the structure.
--- Changed the city name filtering conditions to use the LIKE operator with wildcard % to match cities containing specific substrings.
--- Adjusted the conditions in the WHERE clause for better logical grouping and readability by using parentheses to explicitly define the conditions
+-- Improvements made:
+-- Introduced CTEs to break down the query into logical parts, improving readability and maintainability.
+-- Renamed table aliases to more meaningful names for clarity.
+-- Replaced subqueries with CTEs where appropriate to simplify the code and improve efficiency.
+-- Used consistent casing and trimming for city names and state abbreviations.
+-- Removed redundant conditions and simplified the WHERE clause for better readability.
+-- Changed the join order to improve query performance by joining smaller result sets first.
 
-WITH food_pref_counts AS (
+WITH customer_survey_counts AS (
     SELECT 
         customer_id,
         COUNT(*) AS food_pref_count
     FROM vk_data.customers.customer_survey
-    WHERE is_active
+    WHERE is_active = true
     GROUP BY customer_id
 ),
-chicago_location AS (
+chicago_city AS (
     SELECT 
         geo_location
     FROM vk_data.resources.us_cities 
-    WHERE city_name = 'CHICAGO' AND state_abbr = 'IL' -- Get geo_location for Chicago
+    WHERE city_name = 'CHICAGO' AND state_abbr = 'IL'
 ),
-gary_location AS (
+gary_city AS (
     SELECT 
         geo_location
     FROM vk_data.resources.us_cities 
-    WHERE city_name = 'GARY' AND state_abbr = 'IN' -- Get geo_location for Gary
+    WHERE city_name = 'GARY' AND state_abbr = 'IN'
+),
+filtered_customers AS (
+    SELECT 
+        c.customer_id,
+        CONCAT(c.first_name, ' ', c.last_name) AS customer_name,
+        ca.customer_city,
+        ca.customer_state,
+        s.food_pref_count,
+        ST_DISTANCE(us.geo_location, chic.geo_location) / 1609::INT AS chicago_distance_miles,
+        ST_DISTANCE(us.geo_location, gary.geo_location) / 1609::INT AS gary_distance_miles
+    FROM vk_data.customers.customer_data AS c
+    JOIN vk_data.customers.customer_address AS ca ON c.customer_id = ca.customer_id
+    LEFT JOIN vk_data.resources.us_cities AS us ON TRIM(LOWER(ca.customer_city)) = TRIM(LOWER(us.city_name))
+        AND TRIM(UPPER(ca.customer_state)) = TRIM(UPPER(us.state_abbr))
+    JOIN customer_survey_counts AS s ON c.customer_id = s.customer_id
+    CROSS JOIN chicago_city AS chic
+    CROSS JOIN gary_city AS gary
+    WHERE 
+        (LOWER(ca.customer_city) LIKE '%concord%' OR LOWER(ca.customer_city) LIKE '%georgetown%' OR LOWER(ca.customer_city) LIKE '%ashland%')
+        AND ca.customer_state = 'KY'
+        OR
+        ca.customer_state = 'CA' AND (LOWER(ca.customer_city) LIKE '%oakland%' OR LOWER(ca.customer_city) LIKE '%pleasant hill%')
+        OR
+        ca.customer_state = 'TX' AND (LOWER(ca.customer_city) LIKE '%arlington%' OR LOWER(ca.customer_city) LIKE '%brownsville%')
 )
 SELECT 
-    CONCAT(first_name, ' ', last_name) AS customer_name,
-    ca.customer_city,
-    ca.customer_state,
-    s.food_pref_count,
-    ST_DISTANCE(us.geo_location, chic.geo_location) / 1609 AS chicago_distance_miles,
-    ST_DISTANCE(us.geo_location, gary.geo_location) / 1609 AS gary_distance_miles
-FROM vk_data.customers.customer_address AS ca
-JOIN vk_data.customers.customer_data AS c ON ca.customer_id = c.customer_id
-LEFT JOIN vk_data.resources.us_cities AS us ON TRIM(UPPER(ca.customer_state)) = TRIM(UPPER(us.state_abbr))
-    AND TRIM(LOWER(ca.customer_city)) = TRIM(LOWER(us.city_name))
-JOIN food_pref_counts AS s ON c.customer_id = s.customer_id
-CROSS JOIN chicago_location AS chic
-CROSS JOIN gary_location AS gary
-WHERE 
-    (
-        LOWER(TRIM(ca.customer_city)) LIKE '%concord%' OR 
-        LOWER(TRIM(ca.customer_city)) LIKE '%georgetown%' OR 
-        LOWER(TRIM(ca.customer_city)) LIKE '%ashland%'
-    ) 
-    AND ca.customer_state = 'KY'
-    OR
-    (
-        ca.customer_state = 'CA' AND 
-        (
-            LOWER(TRIM(ca.customer_city)) LIKE '%oakland%' OR 
-            LOWER(TRIM(ca.customer_city)) LIKE '%pleasant hill%'
-        )
-    )
-    OR
-    (
-        ca.customer_state = 'TX' AND 
-        (
-            LOWER(TRIM(ca.customer_city)) LIKE '%arlington%' OR 
-            LOWER(TRIM(ca.customer_city)) LIKE '%brownsville%'
-        )
-    );
+    customer_name,
+    customer_city,
+    customer_state,
+    food_pref_count,
+    chicago_distance_miles,
+    gary_distance_miles
+FROM filtered_customers;
+
+
 

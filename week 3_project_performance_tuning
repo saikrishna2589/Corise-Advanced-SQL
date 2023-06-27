@@ -1,0 +1,67 @@
+
+-- From the query profile, i can see join is the most expensive node.
+--Initialisation takes 67% of the time and processing 33% from the split for a total of 643ms.
+-- The approaches i might take would be to create 'Materilsed views' for some of the CTes to avoid recalculations repeatedly
+--I might also explore other options such as 'Creating indexes' when need be.
+
+ALTER SESSION SET USE_CACHED_RESULT=FALSE;
+WITH unique_events AS (
+    SELECT distinct
+    event_id,
+    session_id,
+    event_timestamp,
+    trim(parse_json(event_details):"event",'""') as event_type,
+    trim(parse_json(event_details):"recipe_id",'""') as recipe_id
+    from website_activity
+    order by session_id
+),
+
+--select * from unique_events
+session_grouping AS (
+    SELECT session_id,
+    min(event_timestamp) as min_event_timestamp,
+    max(event_timestamp) as max_event_timestamp,
+
+    case
+        when count( case when event_type='view_recipe' then 1 end)=0 then null
+        else round(count(case when event_type='search' then 1 end)/count(case when event_type='view_recipe' then 1 end))
+        end as searches_per_recipe
+    from unique_events
+    group by session_id
+        ),
+most_viewed_recipe as (
+
+select
+    date(event_timestamp) as event_date,
+    recipe_id,
+    count(*) as total_views
+    from unique_events
+    where recipe_id is not null
+    group by 
+        date(event_timestamp),
+        recipe_id 
+        qualify row_number () over (partition by event_date order by total_views desc)=1
+        )
+
+        --select * from most_viewed_recipe
+
+        
+
+    select
+    date(min_event_timestamp) as event_date,
+    count(session_id) as total_session,
+    round(avg(timestampdiff(second,min_event_timestamp,max_event_timestamp))) as avg_session_length_seconds,
+    max(most_viewed_recipe.recipe_id) as most_viewed_recipe_id
+    from session_grouping
+    inner join most_viewed_recipe
+    on date(session_grouping.min_event_timestamp)=most_viewed_recipe.event_date
+    group by
+    date(session_grouping.min_event_timestamp)
+    order by event_date asc;
+    
+
+    
+        
+        
+   --select * from session_grouping
+
